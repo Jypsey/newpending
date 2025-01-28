@@ -2,6 +2,7 @@ from pyrogram import Client, filters
 import asyncio
 import os
 from dotenv import load_dotenv
+import time
 
 # Load environment variables
 load_dotenv()
@@ -45,36 +46,40 @@ async def handle_message(client, message):
 
         await message.reply("Approving all pending join requests...")
         try:
-            batch_count = 0
-            while True:
-                requests = []
-                async for request in client.get_chat_join_requests(chat_id, limit=200):
-                    requests.append(request)
+            start_time = time.time()
+            requests = []
+            async for request in client.get_chat_join_requests(chat_id, limit=200):
+                requests.append(request)
 
-                if not requests:
-                    break
+            if not requests:
+                await message.reply("No join requests found.")
+                return
 
-                for request in requests:
-                    try:
-                        # Approve the request
-                        await client.approve_chat_join_request(chat_id, request.user.id)
-                        print(f"Approved {request.user.first_name}'s request.")
-                    except Exception as e:
-                        # Check for the 'USER_CHANNELS_TOO_MUCH' error and disapprove the request
-                        if 'USER_CHANNELS_TOO_MUCH' in str(e):
-                            try:
-                                await client.decline_chat_join_request(chat_id, request.user.id)
-                                print(f"Disapproved {request.user.first_name}'s request due to too many channels.")
-                            except Exception as disapprove_error:
-                                print(f"Error disapproving {request.user.first_name}: {disapprove_error}")
-                        else:
-                            print(f"Skipping {request.user.first_name}: {e}")
+            # Define a task to approve each request concurrently
+            async def approve_request(request):
+                try:
+                    # Approve the request
+                    await client.approve_chat_join_request(chat_id, request.user.id)
+                    print(f"Approved {request.user.first_name}'s request.")
+                except Exception as e:
+                    # Check for the 'USER_CHANNELS_TOO_MUCH' error and disapprove the request
+                    if 'USER_CHANNELS_TOO_MUCH' in str(e):
+                        try:
+                            await client.decline_chat_join_request(chat_id, request.user.id)
+                            print(f"Disapproved {request.user.first_name}'s request due to too many channels.")
+                        except Exception as disapprove_error:
+                            print(f"Error disapproving {request.user.first_name}: {disapprove_error}")
+                    else:
+                        print(f"Skipping {request.user.first_name}: {e}")
 
-                batch_count += 1
-                print(f"Batch {batch_count} processed. Waiting for 2 seconds...")
-                await asyncio.sleep(2)
+            # Use asyncio.gather to run tasks concurrently
+            await asyncio.gather(*(approve_request(req) for req in requests))
 
-            await message.reply("All pending requests have been processed.")
+            # Log how long it took to process
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            await message.reply(f"Processed all requests in {elapsed_time:.2f} seconds.")
+
         except Exception as e:
             await message.reply(f"Error: {e}")
 
