@@ -47,38 +47,49 @@ async def handle_message(client, message):
         await message.reply("Approving all pending join requests...")
         try:
             start_time = time.time()
-            requests = []
-            async for request in client.get_chat_join_requests(chat_id, limit=200):
-                requests.append(request)
+            batch_size = 500  # Adjust the batch size
+            approved_count = 0
+            declined_count = 0
 
-            if not requests:
-                await message.reply("No join requests found.")
-                return
+            while True:
+                requests = []
+                async for request in client.get_chat_join_requests(chat_id, limit=batch_size):
+                    requests.append(request)
 
-            # Define a task to approve each request concurrently
-            async def approve_request(request):
-                try:
-                    # Approve the request
-                    await client.approve_chat_join_request(chat_id, request.user.id)
-                    print(f"Approved {request.user.first_name}'s request.")
-                except Exception as e:
-                    # Check for the 'USER_CHANNELS_TOO_MUCH' error and disapprove the request
-                    if 'USER_CHANNELS_TOO_MUCH' in str(e):
-                        try:
-                            await client.decline_chat_join_request(chat_id, request.user.id)
-                            print(f"Disapproved {request.user.first_name}'s request due to too many channels.")
-                        except Exception as disapprove_error:
-                            print(f"Error disapproving {request.user.first_name}: {disapprove_error}")
-                    else:
-                        print(f"Skipping {request.user.first_name}: {e}")
+                if not requests:
+                    break
 
-            # Use asyncio.gather to run tasks concurrently
-            await asyncio.gather(*(approve_request(req) for req in requests))
+                # Define a task to approve each request concurrently
+                async def approve_request(request):
+                    nonlocal approved_count, declined_count
+                    try:
+                        # Approve the request
+                        await client.approve_chat_join_request(chat_id, request.user.id)
+                        print(f"Approved {request.user.first_name}'s request.")
+                        approved_count += 1
+                    except Exception as e:
+                        # Check for the 'USER_CHANNELS_TOO_MUCH' error and disapprove the request
+                        if 'USER_CHANNELS_TOO_MUCH' in str(e):
+                            try:
+                                await client.decline_chat_join_request(chat_id, request.user.id)
+                                print(f"Disapproved {request.user.first_name}'s request due to too many channels.")
+                                declined_count += 1
+                            except Exception as disapprove_error:
+                                print(f"Error disapproving {request.user.first_name}: {disapprove_error}")
+                        else:
+                            print(f"Skipping {request.user.first_name}: {e}")
+
+                # Use asyncio.gather to process requests in parallel
+                await asyncio.gather(*(approve_request(req) for req in requests))
+
+                # Log progress
+                print(f"Batch processed: Approved {approved_count} requests, Declined {declined_count} requests.")
+                await asyncio.sleep(2)  # Rate limiting pause between batches
 
             # Log how long it took to process
             end_time = time.time()
             elapsed_time = end_time - start_time
-            await message.reply(f"Processed all requests in {elapsed_time:.2f} seconds.")
+            await message.reply(f"Processed all requests in {elapsed_time:.2f} seconds. Approved: {approved_count}, Declined: {declined_count}.")
 
         except Exception as e:
             await message.reply(f"Error: {e}")
